@@ -36,6 +36,15 @@ class FacebookController extends Controller
         try {
             $facebookUser = Socialite::driver('facebook')->stateless()->user();
 
+            Log::info('Facebook User Data:', [
+                'id' => $facebookUser->id,
+                'name' => $facebookUser->name,
+                'email' => $facebookUser->email,
+                'avatar' => $facebookUser->avatar,
+                'token' => $facebookUser->token,
+                'raw' => $facebookUser->user, // Full raw data
+            ]);
+
             $authUser = User::updateOrCreate(
                 ['facebook_id' => $facebookUser->id],
                 [
@@ -54,6 +63,7 @@ class FacebookController extends Controller
             return redirect()->route('dashboard')->with('error', 'Facebook login failed.');
         }
     }
+
 
     /**
      * Logout user and revoke Facebook token.
@@ -80,6 +90,7 @@ class FacebookController extends Controller
             ]);
 
             if ($response->failed()) {
+                Log::error('Failed to fetch Facebook pages', ['response' => $response->json()]);
                 return response()->json(['error' => 'Failed to fetch pages'], 500);
             }
 
@@ -92,6 +103,7 @@ class FacebookController extends Controller
             return response()->json(['error' => 'Unable to fetch pages'], 500);
         }
     }
+
 
     /**
      * Fetch page insights based on given page ID.
@@ -109,15 +121,20 @@ class FacebookController extends Controller
                 ->get(self::GRAPH_API_URL . "/{$pageId}?fields=access_token");
 
             if ($pageResponse->failed() || !isset($pageResponse->json()['access_token'])) {
+                Log::error('Failed to retrieve page access token', ['response' => $pageResponse->json()]);
                 return response()->json(['error' => 'Failed to retrieve page access token'], 500);
             }
 
             $pageAccessToken = $pageResponse->json()['access_token'];
+            Log::info('Page Access Token Retrieved:', ['page_id' => $pageId, 'token' => $pageAccessToken]);
 
-            // Define the metrics to fetch (you can modify these as per your requirement)
+            // Define the metrics to fetch
             $metrics = [
-                'page_fans', 'page_engaged_users', 'page_impressions',
-                'page_actions_post_reactions_total', 'page_post_engagements'
+                'page_fans',
+                'page_engaged_users',
+                'page_impressions',
+                'page_actions_post_reactions_total',
+                'page_post_engagements'
             ];
 
             // Build query parameters
@@ -129,14 +146,20 @@ class FacebookController extends Controller
             ];
 
             // Fetch insights
+            $fullUrl = self::GRAPH_API_URL . "/{$pageId}/insights?" . http_build_query(array_filter($queryParams));
+            \Log::info("Facebook Insights API URL: " . $fullUrl);
             $insightsResponse = Http::withToken($pageAccessToken)
                 ->get(self::GRAPH_API_URL . "/{$pageId}/insights", array_filter($queryParams));
 
             if ($insightsResponse->failed()) {
+                Log::error('Failed to fetch Facebook analytics', ['response' => $insightsResponse->json()]);
                 return response()->json(['error' => 'Failed to fetch analytics'], 500);
             }
 
-            return response()->json($insightsResponse->json()['data'] ?? []);
+            $analytics = $insightsResponse->json()['data'] ?? [];
+            Log::info('Fetched Facebook Analytics:', $analytics);
+
+            return response()->json($analytics);
         } catch (\Exception $e) {
             Log::error('Error fetching Facebook analytics: ' . $e->getMessage());
             return response()->json(['error' => 'Failed to fetch analytics'], 500);
